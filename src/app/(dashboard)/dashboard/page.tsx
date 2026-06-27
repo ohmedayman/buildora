@@ -41,7 +41,7 @@ export default function Dashboard() {
   const [pages, setPages] = useState<Page[]>([]);
   const [stats, setStats] = useState<Stats>({ totalPages: 0, publishedPages: 0, totalViews: 0 });
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [section, setSection] = useState<'overview' | 'pages' | 'templates' | 'settings'>('overview');
+  const [section, setSection] = useState<'overview' | 'pages' | 'templates' | 'settings' | 'messages'>('overview');
   const [showNewPage, setShowNewPage] = useState(false);
   const [pageTitle, setPageTitle] = useState('');
   const [toast, setToast] = useState('');
@@ -132,6 +132,7 @@ export default function Dashboard() {
     { id: 'overview' as const, label: 'نظرة عامة', icon: <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2" y="2" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="11" y="2" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="2" y="11" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="11" y="11" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="1.5"/></svg> },
     { id: 'pages' as const, label: 'صفحاتي', icon: <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 3.5A1.5 1.5 0 015.5 2h3.879a1.5 1.5 0 011.06.44l1.122 1.12A1.5 1.5 0 0012.62 4H14.5A1.5 1.5 0 0116 5.5v9a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 014 14.5v-11z" stroke="currentColor" strokeWidth="1.5"/></svg> },
     { id: 'templates' as const, label: 'القوالب', icon: <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2.5" y="2.5" width="15" height="15" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M2.5 8h15M8 2.5v15" stroke="currentColor" strokeWidth="1.5"/></svg> },
+    { id: 'messages' as const, label: 'الرسائل', icon: <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 4.5A1.5 1.5 0 014.5 3h11A1.5 1.5 0 0117 4.5v7a1.5 1.5 0 01-1.5 1.5H6l-3 2.5V4.5z" stroke="currentColor" strokeWidth="1.5"/></svg> },
     { id: 'settings' as const, label: 'الإعدادات', icon: <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="2.5" stroke="currentColor" strokeWidth="1.5"/><path d="M10 1.5v2M10 16.5v2M1.5 10h2M16.5 10h2M3.46 3.46l1.42 1.42M15.12 15.12l1.42 1.42M3.46 16.54l1.42-1.42M15.12 4.88l1.42-1.42" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
   ];
 
@@ -216,6 +217,7 @@ export default function Dashboard() {
                 {section === 'overview' && 'نظرة عامة'}
                 {section === 'pages' && 'صفحاتي'}
                 {section === 'templates' && 'القوالب'}
+                {section === 'messages' && 'الرسائل'}
                 {section === 'settings' && 'الإعدادات'}
               </h1>
             </div>
@@ -430,6 +432,8 @@ export default function Dashboard() {
               </div>
             </div>
           )}
+
+          {section === 'messages' && <MessagesSection showToast={showToast} />}
         </main>
       </div>
 
@@ -464,6 +468,86 @@ export default function Dashboard() {
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-[var(--gray-900)] text-white px-4 py-2.5 rounded-lg text-[13px] font-medium z-50 shadow-xl flex items-center gap-2 animate-slideUp">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="var(--success)" strokeWidth="1.5"/><path d="M5.5 8l2 2 3-3" stroke="var(--success)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
           {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MessagesSection({ showToast }: { showToast: (m: string) => void }) {
+  const [messages, setMessages] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<'all' | 'new' | 'read'>('all');
+
+  useEffect(() => { loadMessages(); }, [filter]);
+
+  async function loadMessages() {
+    setLoading(true);
+    const url = filter === 'all' ? '/api/messages' : `/api/messages?status=${filter}`;
+    const r = await fetch(url);
+    const d = await r.json();
+    setMessages(d.messages || []);
+    setLoading(false);
+  }
+
+  async function markRead(id: string) {
+    await fetch('/api/messages/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'read' }) });
+    loadMessages();
+    showToast('تم تحديد كمقروء');
+  }
+
+  async function deleteMessage(id: string) {
+    if (!confirm('هل أنت متأكد من حذف الرسالة؟')) return;
+    await fetch('/api/messages/' + id, { method: 'DELETE' });
+    loadMessages();
+    showToast('تم حذف الرسالة');
+  }
+
+  return (
+    <div className="space-y-5 animate-fadeIn">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-[var(--gray-900)]">الرسائل</h2>
+          <p className="text-[13px] text-[var(--gray-500)] mt-1">{messages.length} رسالة</p>
+        </div>
+        <div className="flex gap-1 bg-[var(--gray-100)] p-0.5 rounded-lg">
+          {(['all', 'new', 'read'] as const).map(f => (
+            <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1.5 rounded-md text-[12px] font-medium transition ${filter === f ? 'bg-white shadow-sm text-[var(--gray-800)]' : 'text-[var(--gray-500)]'}`}>
+              {f === 'all' ? 'الكل' : f === 'new' ? 'جديدة' : 'مقروءة'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-12 text-[var(--gray-400)]">جاري التحميل...</div>
+      ) : messages.length === 0 ? (
+        <div className="bg-white rounded-xl border border-[var(--gray-200)] py-12 text-center">
+          <div className="text-4xl mb-3">📭</div>
+          <p className="text-[13px] text-[var(--gray-500)]">لا توجد رسائل</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {messages.map((msg: any) => (
+            <div key={msg.id} className={`bg-white rounded-xl border p-4 transition ${msg.status === 'new' ? 'border-[var(--primary)]/30 border-l-[3px] border-l-[var(--primary)]' : 'border-[var(--gray-200)]'}`}>
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[13px] font-semibold text-[var(--gray-800)]">{msg.name}</span>
+                    <span className="text-[11px] text-[var(--gray-400)]">{msg.email}</span>
+                    {msg.status === 'new' && <span className="px-1.5 py-0.5 bg-[var(--primary)] text-white text-[9px] font-bold rounded">جديد</span>}
+                  </div>
+                  {msg.pages && <div className="text-[11px] text-[var(--gray-400)] mb-1">من صفحة: {msg.pages.title}</div>}
+                  <p className="text-[13px] text-[var(--gray-600)] mt-2">{msg.message}</p>
+                  <div className="text-[10px] text-[var(--gray-400)] mt-2">{new Date(msg.created_at).toLocaleDateString('ar-EG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+                </div>
+                <div className="flex gap-1 mr-3">
+                  {msg.status === 'new' && <button onClick={() => markRead(msg.id)} className="p-1.5 rounded-md hover:bg-[var(--primary-bg)] text-[var(--gray-400)] hover:text-[var(--primary)] transition text-[11px]">✓</button>}
+                  <button onClick={() => deleteMessage(msg.id)} className="p-1.5 rounded-md hover:bg-[var(--danger-bg)] text-[var(--gray-400)] hover:text-[var(--danger)] transition text-[11px]">✕</button>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
