@@ -646,7 +646,13 @@ function SettingsPanel({ pageId }: { pageId: string }) {
   const [seoTitle, setSeoTitle] = useState('');
   const [seoDesc, setSeoDesc] = useState('');
   const [seoKeywords, setSeoKeywords] = useState('');
+  const [ogImage, setOgImage] = useState('');
   const [customCss, setCustomCss] = useState('');
+  const [customJs, setCustomJs] = useState('');
+  const [analyticsCode, setAnalyticsCode] = useState('');
+  const [noIndex, setNoIndex] = useState(false);
+  const [canonicalUrl, setCanonicalUrl] = useState('');
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     fetch('/api/pages/' + pageId).then(r => r.json()).then(d => {
@@ -654,24 +660,76 @@ function SettingsPanel({ pageId }: { pageId: string }) {
         setSeoTitle(d.page.seo_title || '');
         setSeoDesc(d.page.seo_description || '');
         setSeoKeywords(d.page.seo_keywords || '');
+        setOgImage(d.page.og_image || '');
         setCustomCss(d.page.custom_css || '');
+        setCustomJs(d.page.custom_js || '');
+        setAnalyticsCode(d.page.analytics_code || '');
+        setNoIndex(d.page.no_index || false);
+        setCanonicalUrl(d.page.canonical_url || '');
       }
     });
   }, [pageId]);
 
   async function saveSettings() {
-    await fetch('/api/pages/' + pageId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seo_title: seoTitle, seo_description: seoDesc, seo_keywords: seoKeywords, custom_css: customCss }) });
+    const payload: Record<string, any> = {
+      seo_title: seoTitle, seo_description: seoDesc, seo_keywords: seoKeywords,
+      og_image: ogImage, custom_css: customCss, custom_js: customJs,
+    };
+    // Only send new fields if they've been loaded (column exists)
+    if (analyticsCode !== undefined) payload.analytics_code = analyticsCode;
+    if (noIndex !== undefined) payload.no_index = noIndex;
+    if (canonicalUrl !== undefined) payload.canonical_url = canonicalUrl;
+    await fetch('/api/pages/' + pageId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
   }
 
+  const Section = ({ title, children, icon }: { title: string; children: React.ReactNode; icon?: string }) => (
+    <div className="border-b border-gray-100 p-3">
+      <div className="flex items-center gap-1.5 mb-2">
+        {icon && <span className="text-[10px]">{icon}</span>}
+        <span className="text-[10px] uppercase text-gray-400 font-bold tracking-wider">{title}</span>
+      </div>
+      {children}
+    </div>
+  );
+
   return (
-    <div className="p-3 space-y-3">
-      <div className="text-[10px] uppercase text-gray-400 font-bold tracking-wider">SEO</div>
-      <div><label className="text-[10px] text-gray-500 font-semibold block mb-0.5">عنوان الصفحة</label><input value={seoTitle} onChange={e => setSeoTitle(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-[11px] outline-none focus:border-[#6c63ff]" /></div>
-      <div><label className="text-[10px] text-gray-500 font-semibold block mb-0.5">الوصف</label><textarea value={seoDesc} onChange={e => setSeoDesc(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-[11px] outline-none focus:border-[#6c63ff] min-h-16" /></div>
-      <div><label className="text-[10px] text-gray-500 font-semibold block mb-0.5">الكلمات المفتاحية</label><input value={seoKeywords} onChange={e => setSeoKeywords(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-[11px] outline-none focus:border-[#6c63ff]" /></div>
-      <div className="text-[10px] uppercase text-gray-400 font-bold tracking-wider pt-2">CSS مخصص</div>
-      <div><textarea value={customCss} onChange={e => setCustomCss(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-[11px] outline-none focus:border-[#6c63ff] min-h-24 font-mono" placeholder=".my-class { color: red; }" /></div>
-      <button onClick={saveSettings} className="w-full py-2 bg-[#6c63ff] text-white rounded-lg text-xs font-bold hover:bg-[#5b52e0]">حفظ الإعدادات</button>
+    <div className="space-y-0">
+      <Section title="SEO" icon="🔍">
+        <div className="space-y-2">
+          <div><label className="text-[10px] text-gray-500 font-semibold block mb-0.5">عنوان الصفحة (Title)</label><input value={seoTitle} onChange={e => setSeoTitle(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-[11px] outline-none focus:border-[#6c63ff]" placeholder="عنوان الصفحة في نتائج البحث" /></div>
+          <div><label className="text-[10px] text-gray-500 font-semibold block mb-0.5">الوصف (Description)</label><textarea value={seoDesc} onChange={e => setSeoDesc(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-[11px] outline-none focus:border-[#6c63ff] min-h-16" placeholder="وصف الصفحة في نتائج البحث" /></div>
+          <div><label className="text-[10px] text-gray-500 font-semibold block mb-0.5">الكلمات المفتاحية</label><input value={seoKeywords} onChange={e => setSeoKeywords(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-[11px] outline-none focus:border-[#6c63ff]" placeholder="كلمة1, كلمة2, كلمة3" /></div>
+          <div><label className="text-[10px] text-gray-500 font-semibold block mb-0.5">صورة OG (مشاركة على السوشيال ميديا)</label><input value={ogImage} onChange={e => setOgImage(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-[11px] outline-none focus:border-[#6c63ff]" placeholder="https://example.com/image.jpg" /></div>
+          <div><label className="text-[10px] text-gray-500 font-semibold block mb-0.5">الرابط Canonical</label><input value={canonicalUrl} onChange={e => setCanonicalUrl(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-[11px] outline-none focus:border-[#6c63ff]" placeholder="اتركه فارغاً للإفتراضي" /></div>
+          <div className="flex items-center gap-2"><input type="checkbox" checked={noIndex} onChange={e => setNoIndex(e.target.checked)} id="noindex" className="rounded" /><label htmlFor="noindex" className="text-[11px] text-gray-600">إخفاء الصفحة من محركات البحث (noindex)</label></div>
+        </div>
+      </Section>
+
+      <Section title="كود التحليلات" icon="📊">
+        <div className="space-y-2">
+          <div><label className="text-[10px] text-gray-500 font-semibold block mb-0.5">Google Analytics / Pixel</label><textarea value={analyticsCode} onChange={e => setAnalyticsCode(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-[11px] outline-none focus:border-[#6c63ff] min-h-20 font-mono text-[10px]" placeholder={`<!-- Google Analytics -->\n<script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXX"></script>`} /></div>
+          <p className="text-[9px] text-gray-400">الصق كود Google Analytics أو Facebook Pixel هنا</p>
+        </div>
+      </Section>
+
+      <Section title="CSS مخصص" icon="🎨">
+        <div><textarea value={customCss} onChange={e => setCustomCss(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-[11px] outline-none focus:border-[#6c63ff] min-h-24 font-mono" placeholder=".my-class { color: red; }" /></div>
+      </Section>
+
+      <Section title="JavaScript مخصص" icon="⚡">
+        <div className="space-y-2">
+          <div><textarea value={customJs} onChange={e => setCustomJs(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-[11px] outline-none focus:border-[#6c63ff] min-h-24 font-mono" placeholder="// كود JavaScript مخصص\nconsole.log('Hello from Buildora!');" /></div>
+          <p className="text-[9px] text-gray-400">أضف كود JS مخصص (Analytics, Chat widgets, إلخ)</p>
+        </div>
+      </Section>
+
+      <div className="p-3">
+        <button onClick={saveSettings} className={`w-full py-2 rounded-lg text-xs font-bold transition-all ${saved ? 'bg-green-500 text-white' : 'bg-[#6c63ff] text-white hover:bg-[#5b52e0]'}`}>
+          {saved ? '✓ تم الحفظ' : 'حفظ الإعدادات'}
+        </button>
+      </div>
     </div>
   );
 }

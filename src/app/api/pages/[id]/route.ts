@@ -30,7 +30,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const body = await req.json();
   const supabase = getAdmin();
   const updates: Record<string, any> = { updated_at: new Date().toISOString() };
-  const allowed = ['title', 'content', 'seo_title', 'seo_description', 'seo_keywords', 'og_image', 'custom_css', 'custom_js', 'is_published', 'slug'];
+  const allowed = ['title', 'content', 'seo_title', 'seo_description', 'seo_keywords', 'og_image', 'custom_css', 'custom_js', 'analytics_code', 'no_index', 'canonical_url', 'is_published', 'slug'];
   for (const key of allowed) {
     if (body[key] !== undefined) updates[key] = body[key];
   }

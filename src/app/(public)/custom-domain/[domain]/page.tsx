@@ -2,33 +2,39 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 
-export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
-  const { slug } = await params;
-  const { data: page } = await supabaseAdmin.from('pages').select('seo_title, seo_description, seo_keywords, og_image, title, no_index, canonical_url').eq('slug', slug).eq('is_published', true).single();
-  if (!page) return {};
+export async function generateMetadata({ params }: { params: Promise<{ domain: string }> }): Promise<Metadata> {
+  const { domain } = await params;
+  const { data: user } = await supabaseAdmin.from('users').select('name, bio').eq('custom_domain', domain).single();
+  if (!user) return {};
   return {
-    title: page.seo_title || page.title,
-    description: page.seo_description || `صفحة ${page.title} - صُنعت على Buildora`,
-    keywords: page.seo_keywords || page.title,
-    openGraph: {
-      title: page.seo_title || page.title,
-      description: page.seo_description || '',
-      images: page.og_image ? [{ url: page.og_image, width: 1200, height: 630 }] : [],
-      type: 'website',
-    },
-    twitter: { card: 'summary_large_image', title: page.seo_title || page.title, description: page.seo_description || '' },
-    robots: page.no_index ? { index: false, follow: false } : { index: true, follow: true },
-    alternates: page.canonical_url ? { canonical: page.canonical_url } : undefined,
+    title: `${user.name} - Buildora`,
+    description: user.bio || `صفحة ${user.name} - صُنعت على Buildora`,
   };
 }
 
-export default async function PublishedPage({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params;
-  const { data: page } = await supabaseAdmin.from('pages').select('*, users(name, username)').eq('slug', slug).eq('is_published', true).single();
-  if (!page) notFound();
+export default async function CustomDomainPage({ params }: { params: Promise<{ domain: string }> }) {
+  const { domain } = await params;
 
-  try { await supabaseAdmin.from('analytics').insert({ page_id: page.id, visitor_ip: '0.0.0.0', user_agent: '' }); } catch {}
-  try { await supabaseAdmin.from('pages').update({ views: (page.views || 0) + 1 }).eq('id', page.id); } catch {}
+  // Look up user by custom domain
+  const { data: user } = await supabaseAdmin
+    .from('users')
+    .select('id, name, username')
+    .eq('custom_domain', domain)
+    .single();
+
+  if (!user) notFound();
+
+  // Get their latest published page
+  const { data: page } = await supabaseAdmin
+    .from('pages')
+    .select('*')
+    .eq('user_id', user.id)
+    .eq('is_published', true)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (!page) notFound();
 
   let elements: any[] = [];
   try { elements = JSON.parse(page.content || '[]'); } catch {}
@@ -38,6 +44,23 @@ export default async function PublishedPage({ params }: { params: Promise<{ slug
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>{page.seo_title || page.title}</title>
+        {page.seo_description && <meta name="description" content={page.seo_description} />}
+        {page.seo_keywords && <meta name="keywords" content={page.seo_keywords} />}
+        {page.og_image && (
+          <>
+            <meta property="og:title" content={page.seo_title || page.title} />
+            <meta property="og:description" content={page.seo_description || ''} />
+            <meta property="og:image" content={page.og_image} />
+            <meta property="og:type" content="website" />
+            <meta name="twitter:card" content="summary_large_image" />
+            <meta name="twitter:title" content={page.seo_title || page.title} />
+            <meta name="twitter:description" content={page.seo_description || ''} />
+            <meta name="twitter:image" content={page.og_image} />
+          </>
+        )}
+        {page.no_index && <meta name="robots" content="noindex, nofollow" />}
+        {page.canonical_url && <link rel="canonical" href={page.canonical_url} />}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800;900&display=swap" rel="stylesheet" />
@@ -55,13 +78,6 @@ export default async function PublishedPage({ params }: { params: Promise<{ slug
 function RenderElement({ el }: { el: any }) {
   const c = el.content || {};
   const s = el.style || {};
-
-  const baseStyle: React.CSSProperties = {
-    padding: s.padding, margin: s.margin, backgroundColor: s.bgColor, color: s.textColor,
-    borderRadius: s.borderRadius, fontSize: s.fontSize, fontWeight: s.fontWeight as any,
-    textAlign: s.textAlign as any, width: s.width, maxWidth: s.maxWidth, height: s.height,
-    border: s.border, boxShadow: s.boxShadow, opacity: s.opacity ? parseFloat(s.opacity) : undefined,
-  };
 
   switch (el.type) {
     case 'heading': return <h1 style={{ fontSize: s.fontSize || '36px', fontWeight: s.fontWeight || '800', textAlign: (s.textAlign as any) || 'center', padding: s.padding || '16px 20px', color: s.textColor }}>{c.text}</h1>;

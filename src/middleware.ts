@@ -10,15 +10,23 @@ export function middleware(req: NextRequest) {
 
   const hostname = host.split(':')[0];
 
-  if (!hostname.endsWith(`.${baseDomain}`)) {
+  // Check if it's a subdomain of buildora.vexonet.online
+  if (hostname.endsWith(`.${baseDomain}`)) {
+    const subdomain = hostname.replace(`.${baseDomain}`, '');
+    if (subdomain && subdomain !== 'www' && subdomain !== 'app' && subdomain !== 'api') {
+      const url = req.nextUrl.clone();
+      url.pathname = `/u/${subdomain}`;
+      return NextResponse.rewrite(url);
+    }
     return NextResponse.next();
   }
 
-  const subdomain = hostname.replace(`.${baseDomain}`, '');
-
-  if (subdomain && subdomain !== 'www' && subdomain !== 'app' && subdomain !== 'api') {
+  // Check for custom domains - redirect to a catch-all route
+  // Custom domains will be handled by the /u/[username] page
+  // via a lookup in the users table
+  if (hostname !== baseDomain && !hostname.includes('vercel.app') && !hostname.includes('localhost')) {
     const url = req.nextUrl.clone();
-    url.pathname = `/u/${subdomain}`;
+    url.pathname = `/custom-domain/${hostname}`;
     return NextResponse.rewrite(url);
   }
 

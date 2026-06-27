@@ -474,12 +474,15 @@ function SettingsForm({ user, showToast }: { user: User; showToast: (m: string) 
   const [name, setName] = useState(user.name);
   const [username, setUsername] = useState(user.username);
   const [bio, setBio] = useState(user.bio || '');
+  const [customDomain, setCustomDomain] = useState((user as any).custom_domain || '');
   const [saving, setSaving] = useState(false);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    const r = await fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, username, bio }) });
+    const payload: Record<string, any> = { name, username, bio };
+    if (customDomain) payload.custom_domain = customDomain;
+    const r = await fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     const d = await r.json();
     setSaving(false);
     if (d.user) showToast('تم الحفظ'); else showToast(d.error || 'خطأ');
@@ -499,6 +502,11 @@ function SettingsForm({ user, showToast }: { user: User; showToast: (m: string) 
       <div>
         <label className="block text-[12px] font-medium text-[var(--gray-600)] mb-1.5">نبذة عنك</label>
         <textarea value={bio} onChange={e => setBio(e.target.value)} className="w-full px-4 py-2.5 border border-[var(--gray-200)] rounded-lg text-[13px] focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary)]/10 outline-none transition-all min-h-[80px] resize-none" placeholder="اكتب شيئاً عنك..." />
+      </div>
+      <div className="pt-2 border-t border-[var(--gray-100)]">
+        <label className="block text-[12px] font-medium text-[var(--gray-600)] mb-1.5">دومين مخصص (Custom Domain)</label>
+        <input value={customDomain} onChange={e => setCustomDomain(e.target.value)} className="w-full px-4 py-2.5 border border-[var(--gray-200)] rounded-lg text-[13px] focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary)]/10 outline-none transition-all" placeholder="www.example.com" />
+        <p className="text-[11px] text-[var(--gray-400)] mt-1">أضف CNAME record يشير إلى <span className="font-medium">cname.vercel-dns.com</span></p>
       </div>
       <button type="submit" disabled={saving} className="w-full py-2.5 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-lg text-[13px] font-semibold transition-colors shadow-sm disabled:opacity-50">
         {saving ? 'جاري الحفظ...' : 'حفظ التغييرات'}
