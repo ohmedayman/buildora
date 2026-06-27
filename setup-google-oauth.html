@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>Setup Google OAuth - Buildora</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: #f5f5f5; padding: 40px 20px; }
+        .container { max-width: 700px; margin: 0 auto; background: white; border-radius: 16px; padding: 40px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+        h1 { color: #6366F1; margin-bottom: 20px; font-size: 24px; }
+        .step { background: #f8fafc; border-radius: 12px; padding: 20px; margin-bottom: 16px; border-right: 4px solid #6366F1; }
+        .step-number { background: #6366F1; color: white; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; margin-left: 10px; }
+        .step-title { font-weight: 700; font-size: 16px; color: #1e293b; }
+        .step-desc { color: #64748b; font-size: 14px; margin-top: 8px; line-height: 1.6; }
+        .code { background: #1e293b; color: #22d3ee; padding: 12px 16px; border-radius: 8px; font-family: monospace; font-size: 13px; direction: ltr; text-align: left; margin-top: 8px; user-select: all; cursor: pointer; word-break: break-all; }
+        .code:hover { background: #334155; }
+        .btn { display: inline-block; background: #6366F1; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; margin-top: 10px; }
+        .btn:hover { background: #4F46E5; }
+        .highlight { background: #fef3c7; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
+        .copy-hint { color: #94a3b8; font-size: 12px; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 إعداد Google OAuth لـ Buildora</h1>
+        <p style="color: #64748b; margin-bottom: 24px;">اتبع الخطوات بالترتيب — كل حاجة جاهزة تنسخها</p>
+
+        <div class="step">
+            <span class="step-number">1</span>
+            <span class="step-title">افتح Google Cloud Console</span>
+            <div class="step-desc">
+                <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="btn">فتح Google Cloud Console ↗</a>
+            </div>
+        </div>
+
+        <div class="step">
+            <span class="step-number">2</span>
+            <span class="step-title">اضغط + Create Credentials → OAuth client ID</span>
+            <div class="step-desc">من الأعلى اضغط على الزر الأزرق</div>
+        </div>
+
+        <div class="step">
+            <span class="step-number">3</span>
+            <span class="step-title">املأ البيانات</span>
+            <div class="step-desc">
+                <strong>Application type:</strong> اختار <span class="highlight">Web application</span><br>
+                <strong>Name:</strong> اكتب <span class="highlight">Buildora</span>
+            </div>
+        </div>
+
+        <div class="step">
+            <span class="step-number">4</span>
+            <span class="step-title">أضف Authorized redirect URI</span>
+            <div class="step-desc">
+                اضغط <span class="highlight">+ Add URI</span> والصق الرابط ده:
+                <div class="code" onclick="navigator.clipboard.writeText(this.textContent); this.style.background='#065f46'; this.textContent='✅ تم النسخ!'; setTimeout(()=>{this.style.background='#1e293b'; this.textContent='https://scosuziupwgxxjmildnr.supabase.co/auth/v1/callback';}, 1500);">https://scosuziupwgxxjmildnr.supabase.co/auth/v1/callback</div>
+                <div class="copy-hint">اضغط على الكود عشان يتنسخ تلقائي</div>
+            </div>
+        </div>
+
+        <div class="step">
+            <span class="step-number">5</span>
+            <span class="step-title">اضغط Create</span>
+            <div class="step-desc">هتطلع نافذة فيها Client ID و Client Secret</div>
+        </div>
+
+        <div class="step">
+            <span class="step-number">6</span>
+            <span class="step-title">ابعتلي Client ID و Client Secret</span>
+            <div class="step-desc">
+                انسخهم من النافذة وأعتليهم هنا — وأنا أكمّل الباقي في Supabase تلقائي!
+            </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 24px; padding: 16px; background: #ecfdf5; border-radius: 12px;">
+            <strong style="color: #065f46;">💡 ملاحظة:</strong>
+            <span style="color: #047857;"> لو مش لاقي Credentials، اضغط على القائمة الشمال → APIs & Services → Credentials</span>
+        </div>
+    </div>
+</body>
+</html>
