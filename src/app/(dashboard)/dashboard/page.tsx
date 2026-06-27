@@ -4,47 +4,80 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
 interface User { id: string; name: string; username: string; email: string; plan: string; bio: string; }
-interface Page { id: string; title: string; slug: string; is_published: boolean; views: number; updated_at: string; created_at: string; }
-interface Stats { totalPages: number; publishedPages: number; totalViews: number; recentPages: Page[]; }
+interface Page { id: string; title: string; slug: string; is_published: boolean; views: number; updated_at: string; created_at: string; content?: string; }
+interface Stats { totalPages: number; publishedPages: number; totalViews: number; }
 interface Template { id: string; name: string; nameEn: string; thumbnail: string; category: string; content: string; }
+
+function formatDate(d: string) {
+  const date = new Date(d);
+  const now = new Date();
+  const diff = Math.floor((now.getTime() - date.getTime()) / 1000);
+  if (diff < 60) return 'الآن';
+  if (diff < 3600) return `منذ ${Math.floor(diff / 60)} دقيقة`;
+  if (diff < 86400) return `منذ ${Math.floor(diff / 3600)} ساعة`;
+  if (diff < 604800) return `منذ ${Math.floor(diff / 86400)} يوم`;
+  return date.toLocaleDateString('ar-EG', { day: 'numeric', month: 'short' });
+}
+
+function getPageColor(title: string) {
+  const colors = [
+    'from-indigo-500 to-purple-600',
+    'from-cyan-500 to-blue-600',
+    'from-emerald-500 to-teal-600',
+    'from-amber-500 to-orange-600',
+    'from-rose-500 to-pink-600',
+    'from-violet-500 to-purple-600',
+    'from-sky-500 to-indigo-600',
+    'from-fuchsia-500 to-pink-600',
+  ];
+  let hash = 0;
+  for (let i = 0; i < title.length; i++) hash = title.charCodeAt(i) + ((hash << 5) - hash);
+  return colors[Math.abs(hash) % colors.length];
+}
 
 export default function Dashboard() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [pages, setPages] = useState<Page[]>([]);
-  const [stats, setStats] = useState<Stats | null>(null);
+  const [stats, setStats] = useState<Stats>({ totalPages: 0, publishedPages: 0, totalViews: 0 });
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [section, setSection] = useState('overview');
+  const [section, setSection] = useState<'overview' | 'pages' | 'templates' | 'settings'>('overview');
   const [showNewPage, setShowNewPage] = useState(false);
   const [pageTitle, setPageTitle] = useState('');
   const [toast, setToast] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [loading, setLoading] = useState(true);
 
   const BASE = 'buildora.vexonet.online';
 
   useEffect(() => {
     fetch('/api/auth/me').then(r => { if (!r.ok) throw ''; return r.json(); })
-      .then(d => { setUser(d.user); loadStats(); loadPages(); loadTemplates(); })
+      .then(d => { setUser(d.user); loadData(); })
       .catch(() => router.push('/login'));
   }, [router]);
 
-  async function loadStats() {
+  async function loadData() {
     try {
-      const r = await fetch('/api/pages');
-      const d = await r.json();
-      const p = d.pages || [];
+      const [pagesRes, templatesRes] = await Promise.all([fetch('/api/pages'), fetch('/api/templates')]);
+      const pagesData = await pagesRes.json();
+      const templatesData = await templatesRes.json();
+      const p = pagesData.pages || [];
       setPages(p);
-      setStats({ totalPages: p.length, publishedPages: p.filter((x: Page) => x.is_published).length, totalViews: p.reduce((s: number, x: Page) => s + (x.views || 0), 0), recentPages: p.slice(0, 5) });
+      setTemplates(templatesData.templates || []);
+      setStats({
+        totalPages: p.length,
+        publishedPages: p.filter((x: Page) => x.is_published).length,
+        totalViews: p.reduce((s: number, x: Page) => s + (x.views || 0), 0),
+      });
     } catch {}
+    setLoading(false);
   }
-
-  async function loadPages() { const r = await fetch('/api/pages'); const d = await r.json(); setPages(d.pages || []); }
-  async function loadTemplates() { const r = await fetch('/api/templates'); const d = await r.json(); setTemplates(d.templates || []); }
 
   async function createPage() {
     if (!pageTitle.trim()) return;
     const r = await fetch('/api/pages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: pageTitle }) });
     const d = await r.json();
-    if (d.page) router.push('/dashboard/' + d.page.id);
+    if (d.page) { setShowNewPage(false); setPageTitle(''); router.push('/dashboard/' + d.page.id); }
     else showToast(d.error || 'حدث خطأ');
   }
 
@@ -53,191 +86,240 @@ export default function Dashboard() {
     if (!tpl) return;
     const r = await fetch('/api/pages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: tpl.name }) });
     const d = await r.json();
-    if (d.page) { await fetch('/api/pages/' + d.page.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: tpl.content }) }); router.push('/dashboard/' + d.page.id); }
+    if (d.page) {
+      await fetch('/api/pages/' + d.page.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: tpl.content }) });
+      router.push('/dashboard/' + d.page.id);
+    }
   }
 
-  async function togglePublish(id: string, current: boolean) { await fetch('/api/pages/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_published: !current }) }); loadPages(); loadStats(); }
-  async function deletePage(id: string) { if (!confirm('هل أنت متأكد من حذف هذه الصفحة؟')) return; await fetch('/api/pages/' + id, { method: 'DELETE' }); loadPages(); loadStats(); showToast('تم حذف الصفحة'); }
-  async function logout() { await fetch('/api/auth/logout', { method: 'POST' }); router.push('/'); }
-  function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(''), 3000); }
+  async function togglePublish(id: string, current: boolean) {
+    await fetch('/api/pages/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_published: !current }) });
+    loadData();
+    showToast(current ? 'تم إلغاء النشر' : 'تم النشر بنجاح');
+  }
+
+  async function deletePage(id: string) {
+    if (!confirm('هل أنت متأكد من حذف هذه الصفحة؟')) return;
+    await fetch('/api/pages/' + id, { method: 'DELETE' });
+    loadData();
+    showToast('تم حذف الصفحة');
+  }
+
+  async function logout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    router.push('/');
+  }
+
+  function showToast(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(''), 3000);
+  }
 
   const sub = user?.username || user?.name?.toLowerCase().replace(/\s+/g, '') || '';
 
-  if (!user) return <div className="min-h-screen flex items-center justify-center bg-[var(--gray-50)]"><div className="w-10 h-10 border-[3px] border-[var(--primary)] border-t-transparent rounded-full animate-spin" /></div>;
+  if (loading || !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[var(--gray-50)]">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-[3px] border-[var(--primary)] border-t-transparent rounded-full animate-spin" />
+          <span className="text-sm text-[var(--gray-400)]">جاري التحميل...</span>
+        </div>
+      </div>
+    );
+  }
 
   const navItems = [
-    { id: 'overview', label: 'نظرة عامة', icon: <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg> },
-    { id: 'pages', label: 'صفحاتي', icon: <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg> },
-    { id: 'templates', label: 'القوالب', icon: <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42" /></svg> },
-    { id: 'settings', label: 'الإعدادات', icon: <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg> },
+    { id: 'overview' as const, label: 'نظرة عامة', icon: <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2" y="2" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="11" y="2" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="2" y="11" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="11" y="11" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="1.5"/></svg> },
+    { id: 'pages' as const, label: 'صفحاتي', icon: <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 3.5A1.5 1.5 0 015.5 2h3.879a1.5 1.5 0 011.06.44l1.122 1.12A1.5 1.5 0 0012.62 4H14.5A1.5 1.5 0 0116 5.5v9a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 014 14.5v-11z" stroke="currentColor" strokeWidth="1.5"/></svg> },
+    { id: 'templates' as const, label: 'القوالب', icon: <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2.5" y="2.5" width="15" height="15" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M2.5 8h15M8 2.5v15" stroke="currentColor" strokeWidth="1.5"/></svg> },
+    { id: 'settings' as const, label: 'الإعدادات', icon: <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="2.5" stroke="currentColor" strokeWidth="1.5"/><path d="M10 1.5v2M10 16.5v2M1.5 10h2M16.5 10h2M3.46 3.46l1.42 1.42M15.12 15.12l1.42 1.42M3.46 16.54l1.42-1.42M15.12 4.88l1.42-1.42" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
   ];
+
+  const sidebarWidth = sidebarOpen ? 'var(--sidebar-width)' : 'var(--sidebar-collapsed)';
 
   return (
     <div className="min-h-screen bg-[var(--gray-50)]" dir="rtl">
-      {/* Top Navbar */}
-      <nav className="bg-white/80 backdrop-blur-2xl border-b border-[var(--gray-100)]/50 sticky top-0 z-50">
-        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Link href="/" className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-gradient-to-br from-[var(--primary)] to-[var(--accent)] rounded-xl flex items-center justify-center shadow-lg shadow-[var(--primary)]/20">
-                <span className="text-white font-extrabold text-xs">B</span>
+      {/* Sidebar */}
+      <aside
+        className="fixed top-0 right-0 h-screen bg-white border-l border-[var(--gray-200)] z-40 flex flex-col transition-all duration-300 ease-in-out"
+        style={{ width: sidebarWidth }}
+      >
+        {/* Logo */}
+        <div className="h-16 flex items-center gap-3 px-5 border-b border-[var(--gray-100)]">
+          <Link href="/" className="flex items-center gap-2.5">
+            <div className="w-8 h-8 bg-gradient-to-br from-[var(--primary)] to-[var(--primary-hover)] rounded-lg flex items-center justify-center flex-shrink-0">
+              <span className="text-white font-bold text-xs">B</span>
+            </div>
+            {sidebarOpen && <span className="text-[15px] font-bold text-[var(--gray-900)]">Buildora</span>}
+          </Link>
+        </div>
+
+        {/* Nav */}
+        <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
+          {navItems.map(item => (
+            <button
+              key={item.id}
+              onClick={() => setSection(item.id)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-200 ${
+                section === item.id
+                  ? 'bg-[var(--primary-bg)] text-[var(--primary)] font-semibold'
+                  : 'text-[var(--gray-500)] hover:bg-[var(--gray-50)] hover:text-[var(--gray-700)]'
+              }`}
+              title={!sidebarOpen ? item.label : undefined}
+            >
+              <span className="flex-shrink-0">{item.icon}</span>
+              {sidebarOpen && (
+                <>
+                  <span className="flex-1 text-right">{item.label}</span>
+                  {item.id === 'pages' && pages.length > 0 && (
+                    <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-[var(--gray-100)] text-[var(--gray-500)] font-medium">{pages.length}</span>
+                  )}
+                </>
+              )}
+            </button>
+          ))}
+        </nav>
+
+        {/* User */}
+        <div className="p-3 border-t border-[var(--gray-100)]">
+          {sidebarOpen ? (
+            <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-[var(--gray-50)] transition-colors cursor-pointer">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[var(--primary)] to-[var(--primary-light)] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                {user.name?.[0] || 'U'}
               </div>
-              <span className="text-xl font-extrabold text-[var(--gray-900)] hidden sm:block">Buildora</span>
-            </Link>
+              <div className="flex-1 min-w-0">
+                <div className="text-[13px] font-semibold text-[var(--gray-800)] truncate">{user.name}</div>
+                <div className="text-[11px] text-[var(--gray-400)] truncate">{user.email}</div>
+              </div>
+              <button onClick={logout} className="p-1.5 rounded-md hover:bg-[var(--danger-bg)] text-[var(--gray-400)] hover:text-[var(--danger)] transition-colors" title="تسجيل الخروج">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 14H3.333A1.333 1.333 0 012 12.667V3.333A1.333 1.333 0 013.333 2H6M10.667 11.333L14 8l-3.333-3.333M14 8H6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+            </div>
+          ) : (
+            <button onClick={logout} className="w-full flex items-center justify-center p-2.5 rounded-lg hover:bg-[var(--danger-bg)] text-[var(--gray-400)] hover:text-[var(--danger)] transition-colors" title="تسجيل الخروج">
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M6 14H3.333A1.333 1.333 0 012 12.667V3.333A1.333 1.333 0 013.333 2H6M10.667 11.333L14 8l-3.333-3.333M14 8H6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+          )}
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <div className="transition-all duration-300 ease-in-out" style={{ marginRight: sidebarWidth }}>
+        {/* Top Header */}
+        <header className="h-16 bg-white/80 backdrop-blur-xl border-b border-[var(--gray-200)] sticky top-0 z-30 flex items-center justify-between px-6">
+          <div className="flex items-center gap-4">
+            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 rounded-lg hover:bg-[var(--gray-100)] text-[var(--gray-500)] transition-colors">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+            </button>
+            <div>
+              <h1 className="text-[15px] font-semibold text-[var(--gray-900)]">
+                {section === 'overview' && 'نظرة عامة'}
+                {section === 'pages' && 'صفحاتي'}
+                {section === 'templates' && 'القوالب'}
+                {section === 'settings' && 'الإعدادات'}
+              </h1>
+            </div>
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={() => { navigator.clipboard.writeText(`https://${sub}.${BASE}`); showToast('تم النسخ!'); }}
-              className="hidden sm:flex items-center gap-2 bg-[var(--gray-50)] px-3.5 py-2 rounded-xl border border-[var(--gray-200)] hover:bg-[var(--gray-100)] transition-all duration-300 text-xs text-[var(--gray-500)] font-medium cursor-pointer">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-4.888a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364L5.25 8.689" /></svg>
-              {sub}.{BASE}
+            <button
+              onClick={() => { navigator.clipboard.writeText(`https://${sub}.${BASE}`); showToast('تم نسخ رابط صفحتك!'); }}
+              className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--gray-200)] hover:bg-[var(--gray-50)] text-[var(--gray-500)] text-[12px] font-medium transition-colors"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5.25 8.75L8.75 5.25M6.125 2.625H3.5a1.75 1.75 0 00-1.75 1.75v6.125a1.75 1.75 0 001.75 1.75h6.125a1.75 1.75 0 001.75-1.75V8.75" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              <span className="max-w-[120px] truncate">{sub}.{BASE}</span>
             </button>
-            <Link href="/pricing" className="hidden sm:inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-br from-[var(--primary)] to-[var(--primary-dark)] text-white text-xs font-semibold hover:shadow-lg hover:shadow-[var(--primary)]/25 transition-all duration-300">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>
-              ترقية
-            </Link>
-            <div className="flex items-center gap-2.5 pl-3 border-l border-[var(--gray-200)]">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[var(--primary)] to-[var(--accent)] flex items-center justify-center text-white text-xs font-bold shadow-sm">{user.name[0]}</div>
-              <span className="text-sm font-semibold text-[var(--gray-700)] hidden sm:block">{user.name}</span>
-            </div>
-            <button onClick={logout} className="p-2 rounded-xl hover:bg-[var(--danger-bg)] text-[var(--gray-400)] hover:text-[var(--danger)] transition-all duration-300">
-              <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" /></svg>
+            <button onClick={() => setShowNewPage(true)} className="flex items-center gap-2 px-4 py-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-lg text-[13px] font-semibold transition-colors shadow-sm">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+              صفحة جديدة
             </button>
           </div>
-        </div>
-      </nav>
+        </header>
 
-      <div className="flex max-w-[1400px] mx-auto">
-        {/* Sidebar */}
-        <aside className="w-64 p-4 pt-8 hidden lg:block">
-          <div className="text-[10px] uppercase text-[var(--gray-400)] tracking-widest mb-4 px-4 font-bold">القائمة</div>
-          <div className="space-y-1">
-            {navItems.map(item => (
-              <button key={item.id} onClick={() => setSection(item.id)}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-semibold transition-all duration-300 ${section === item.id ? 'bg-gradient-to-br from-[var(--primary)] to-[var(--primary-dark)] text-white shadow-lg shadow-[var(--primary)]/20' : 'text-[var(--gray-500)] hover:bg-[var(--gray-100)] hover:text-[var(--gray-700)]'}`}>
-                {item.icon}{item.label}
-                {item.id === 'pages' && pages.length > 0 && <span className={`mr-auto text-[10px] px-2 py-0.5 rounded-full ${section === item.id ? 'bg-white/20' : 'bg-[var(--gray-200)] text-[var(--gray-500)]'}`}>{pages.length}</span>}
-              </button>
-            ))}
-          </div>
-        </aside>
-
-        <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8">
+        {/* Content */}
+        <main className="p-6">
           {section === 'overview' && (
-            <div className="space-y-7 animate-fadeIn">
-              {/* Welcome Header */}
-              <div className="bg-gradient-to-br from-[var(--primary)] via-[#7c3aed] to-[var(--accent)] rounded-3xl p-8 sm:p-10 text-white relative overflow-hidden">
-                <div className="absolute -top-20 -left-20 w-56 h-56 bg-white/5 rounded-full" />
-                <div className="absolute -bottom-12 -right-12 w-40 h-40 bg-white/5 rounded-full" />
-                <div className="absolute top-1/2 left-1/3 w-72 h-72 bg-white/3 rounded-full blur-3xl" />
-                <div className="relative">
-                  <div className="flex items-center gap-2.5 mb-3">
-                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                    <span className="text-white/60 text-xs font-medium">متصل</span>
+            <div className="space-y-6 animate-fadeIn">
+              {/* Welcome */}
+              <div className="bg-white rounded-xl border border-[var(--gray-200)] p-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-xl font-bold text-[var(--gray-900)]">مرحباً {user.name} 👋</h2>
+                    <p className="text-[13px] text-[var(--gray-500)] mt-1">إليك ملخص صفحتك — أنشئ ونشر صفحاتك الاحترافية</p>
                   </div>
-                  <h1 className="text-3xl sm:text-4xl font-extrabold mb-3">مرحباً {user.name}!</h1>
-                  <p className="text-white/70 text-base mb-6">ابدأ ببناء صفحتك الاحترافية الآن</p>
-                  <div className="flex flex-wrap gap-3">
-                    <button onClick={() => setShowNewPage(true)}
-                      className="inline-flex items-center gap-2.5 bg-white px-6 py-3 rounded-2xl text-sm font-bold text-[var(--primary)] hover:bg-white/90 transition-all duration-300 shadow-xl shadow-black/10 hover:scale-105">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-                      صفحة جديدة
-                    </button>
-                    <button onClick={() => { navigator.clipboard.writeText(`https://${sub}.${BASE}`); showToast('تم النسخ!'); }}
-                      className="inline-flex items-center gap-2.5 bg-white/15 backdrop-blur-sm px-5 py-3 rounded-2xl text-sm font-semibold hover:bg-white/25 transition-all duration-300 border border-white/20">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-4.888a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364L5.25 8.689" /></svg>
-                      {sub}.{BASE}
-                    </button>
-                  </div>
+                  <a
+                    href={`https://${sub}.${BASE}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-4 py-2 border border-[var(--gray-200)] rounded-lg text-[13px] font-medium text-[var(--gray-600)] hover:bg-[var(--gray-50)] transition-colors"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5.25 8.75L8.75 5.25M6.125 2.625H3.5a1.75 1.75 0 00-1.75 1.75v6.125a1.75 1.75 0 001.75 1.75h6.125a1.75 1.75 0 001.75-1.75V8.75" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    زيارة صفحتي
+                  </a>
                 </div>
               </div>
 
-              {/* Stats Cards */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
+              {/* Stats */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {[
-                  { icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>, bg: 'var(--primary-bg)', color: 'var(--primary)', value: stats?.totalPages || 0, label: 'الصفحات', trend: '+2 هذا الأسبوع' },
-                  { icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>, bg: 'var(--success-bg)', color: 'var(--success)', value: stats?.totalViews || 0, label: 'المشاهدات', trend: 'مستمر' },
-                  { icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>, bg: 'var(--warning-bg)', color: 'var(--warning)', value: stats?.publishedPages || 0, label: 'منشورة', trend: 'جاهزة للعرض' },
-                  { icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m6.75 12H9.75m3 0H9.75m3 0H9.75m0 3H9.75m-3 0H6.75m0-3H6.75m0 3H6.75m0 0H4.5M3 3h18M3 3v18" /></svg>, bg: 'var(--accent-bg)', color: 'var(--accent)', value: stats?.totalPages ? (stats.totalPages - stats.publishedPages) : 0, label: 'مسودات', trend: 'قابلة للتعديل' },
+                  { label: 'إجمالي الصفحات', value: stats.totalPages, icon: <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 3.5A1.5 1.5 0 015.5 2h3.879a1.5 1.5 0 011.06.44l1.122 1.12A1.5 1.5 0 0012.62 4H14.5A1.5 1.5 0 0116 5.5v9a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 014 14.5v-11z" stroke="currentColor" strokeWidth="1.3"/></svg>, color: 'var(--primary)', bg: 'var(--primary-bg)' },
+                  { label: 'صفحات منشورة', value: stats.publishedPages, icon: <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.5" stroke="currentColor" strokeWidth="1.3"/><path d="M6.5 10l2.5 2.5 5-5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>, color: 'var(--success)', bg: 'var(--success-bg)' },
+                  { label: 'إجمالي المشاهدات', value: stats.totalViews, icon: <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 4C4.5 4 1.5 10 1.5 10s3 6 8.5 6 8.5-6 8.5-6-3-6-8.5-6z" stroke="currentColor" strokeWidth="1.3"/><circle cx="10" cy="10" r="2.5" stroke="currentColor" strokeWidth="1.3"/></svg>, color: 'var(--accent)', bg: 'var(--accent-bg)' },
                 ].map((s, i) => (
-                  <div key={i} className="bg-white rounded-3xl border border-[var(--gray-100)] p-6 hover:shadow-lg hover:-translate-y-1 transition-all duration-500">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{background: s.bg, color: s.color}}>{s.icon}</div>
-                      <span className="text-[10px] font-medium text-[var(--gray-400)]">{s.trend}</span>
+                  <div key={i} className="bg-white rounded-xl border border-[var(--gray-200)] p-5 hover:shadow-sm transition-shadow">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: s.bg, color: s.color }}>
+                        {s.icon}
+                      </div>
+                      <div>
+                        <div className="text-2xl font-bold text-[var(--gray-900)]">{s.value}</div>
+                        <div className="text-[12px] text-[var(--gray-500)] font-medium">{s.label}</div>
+                      </div>
                     </div>
-                    <div className="text-3xl font-extrabold text-[var(--gray-900)]">{s.value}</div>
-                    <div className="text-xs text-[var(--gray-400)] mt-1 font-medium">{s.label}</div>
                   </div>
                 ))}
               </div>
 
-              {/* Quick Actions */}
-              <div>
-                <h3 className="text-base font-bold text-[var(--gray-900)] mb-4">إجراءات سريعة</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-                  <button onClick={() => setShowNewPage(true)} className="bg-white border border-dashed border-[var(--gray-200)] rounded-3xl p-6 text-center hover:border-[var(--primary)] hover:bg-[var(--primary-bg)]/50 transition-all duration-500 group">
-                    <div className="w-14 h-14 rounded-2xl bg-[var(--primary-bg)] flex items-center justify-center mx-auto mb-4 group-hover:bg-[var(--primary)] group-hover:text-white transition-all duration-300 text-[var(--primary)]">
-                      <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-                    </div>
-                    <div className="text-sm font-bold text-[var(--gray-900)] mb-1">صفحة جديدة</div>
-                    <div className="text-xs text-[var(--gray-400)]">ابدأ من الصفر</div>
-                  </button>
-                  <button onClick={() => setSection('templates')} className="bg-white border border-dashed border-[var(--gray-200)] rounded-3xl p-6 text-center hover:border-[var(--accent)] hover:bg-[var(--accent-bg)]/50 transition-all duration-500 group">
-                    <div className="w-14 h-14 rounded-2xl bg-[var(--accent-bg)] flex items-center justify-center mx-auto mb-4 group-hover:bg-[var(--accent)] group-hover:text-white transition-all duration-300 text-[var(--accent)]">
-                      <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42" /></svg>
-                    </div>
-                    <div className="text-sm font-bold text-[var(--gray-900)] mb-1">من قالب</div>
-                    <div className="text-xs text-[var(--gray-400)]">{templates.length} قالب جاهز</div>
-                  </button>
-                  <button onClick={() => setSection('settings')} className="bg-white border border-dashed border-[var(--gray-200)] rounded-3xl p-6 text-center hover:border-[var(--warning)] hover:bg-[var(--warning-bg)]/50 transition-all duration-500 group">
-                    <div className="w-14 h-14 rounded-2xl bg-[var(--warning-bg)] flex items-center justify-center mx-auto mb-4 group-hover:bg-[var(--warning)] group-hover:text-white transition-all duration-300 text-[var(--warning)]">
-                      <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                    </div>
-                    <div className="text-sm font-bold text-[var(--gray-900)] mb-1">الإعدادات</div>
-                    <div className="text-xs text-[var(--gray-400)]">تعديل الحساب</div>
-                  </button>
-                </div>
-              </div>
-
               {/* Recent Pages */}
-              <div className="bg-white rounded-3xl border border-[var(--gray-100)] overflow-hidden">
-                <div className="flex justify-between items-center px-7 py-5 border-b border-[var(--gray-100)]">
-                  <div>
-                    <h2 className="text-base font-bold text-[var(--gray-900)]">آخر الصفحات</h2>
-                    <p className="text-xs text-[var(--gray-400)] mt-1">{stats?.recentPages?.length || 0} من أصل {pages.length}</p>
-                  </div>
-                  {pages.length > 0 && <button onClick={() => setSection('pages')} className="text-[var(--primary)] text-xs font-semibold hover:underline">عرض الكل</button>}
+              <div className="bg-white rounded-xl border border-[var(--gray-200)]">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--gray-100)]">
+                  <h3 className="text-[14px] font-semibold text-[var(--gray-900)]">آخر الصفحات</h3>
+                  {pages.length > 0 && (
+                    <button onClick={() => setSection('pages')} className="text-[12px] font-medium text-[var(--primary)] hover:text-[var(--primary-hover)] transition-colors">عرض الكل</button>
+                  )}
                 </div>
-                {stats?.recentPages?.length ? (
-                  <div className="divide-y divide-[var(--gray-50)]">
-                    {stats.recentPages.map(p => (
-                      <div key={p.id} className="flex items-center justify-between px-7 py-4 hover:bg-[var(--gray-50)] transition-colors duration-300">
-                        <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 rounded-2xl bg-[var(--primary-bg)] flex items-center justify-center">
-                            <svg className="w-5 h-5 text-[var(--primary)]" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
+                {pages.length > 0 ? (
+                  <div className="divide-y divide-[var(--gray-100)]">
+                    {pages.slice(0, 5).map(p => (
+                      <div key={p.id} className="flex items-center justify-between px-5 py-3.5 hover:bg-[var(--gray-25)] transition-colors group">
+                        <div className="flex items-center gap-3.5">
+                          <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${getPageColor(p.title)} flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0`}>
+                            {p.title[0]}
                           </div>
-                          <div>
-                            <div className="text-sm font-bold text-[var(--gray-900)]">{p.title}</div>
-                            <div className="text-xs text-[var(--gray-400)]">/{p.slug}</div>
+                          <div className="min-w-0">
+                            <div className="text-[13px] font-semibold text-[var(--gray-800)] truncate">{p.title}</div>
+                            <div className="text-[11px] text-[var(--gray-400)]">/{p.slug} · {formatDate(p.updated_at)}</div>
                           </div>
                         </div>
-                        <div className="flex items-center gap-3">
-                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${p.is_published ? 'bg-[var(--success-bg)] text-[var(--success)]' : 'bg-[var(--warning-bg)] text-[var(--warning)]'}`}>{p.is_published ? 'منشورة' : 'مسودة'}</span>
-                          <div className="flex gap-1.5">
-                            <Link href={'/dashboard/' + p.id} className="px-3 py-1.5 bg-gradient-to-br from-[var(--primary)] to-[var(--primary-dark)] text-white rounded-xl text-[11px] font-semibold hover:shadow-md transition-all duration-300">تعديل</Link>
-                            <button onClick={() => togglePublish(p.id, p.is_published)} className="px-3 py-1.5 bg-[var(--gray-100)] text-[var(--gray-600)] rounded-xl text-[11px] font-semibold hover:bg-[var(--gray-200)] transition-all duration-300">{p.is_published ? 'إلغاء' : 'نشر'}</button>
-                          </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${p.is_published ? 'bg-[var(--success-bg)] text-[var(--success)]' : 'bg-[var(--gray-100)] text-[var(--gray-500)]'}`}>
+                            {p.is_published ? 'منشورة' : 'مسودة'}
+                          </span>
+                          <Link href={'/dashboard/' + p.id} className="px-2.5 py-1.5 rounded-md bg-[var(--gray-100)] text-[var(--gray-600)] text-[11px] font-medium hover:bg-[var(--primary)] hover:text-white transition-colors opacity-0 group-hover:opacity-100">
+                            تعديل
+                          </Link>
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="px-7 py-16 text-center">
-                    <div className="w-16 h-16 rounded-3xl bg-[var(--gray-100)] flex items-center justify-center mx-auto mb-4">
-                      <svg className="w-8 h-8 text-[var(--gray-300)]" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>
+                  <div className="px-5 py-12 text-center">
+                    <div className="w-12 h-12 rounded-xl bg-[var(--gray-100)] flex items-center justify-center mx-auto mb-3">
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M19 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2z" stroke="var(--gray-300)" strokeWidth="1.5"/><path d="M9 7h6M9 12h6M9 17h3" stroke="var(--gray-300)" strokeWidth="1.5" strokeLinecap="round"/></svg>
                     </div>
-                    <h3 className="text-base font-bold text-[var(--gray-900)] mb-2">لا توجد صفحات بعد</h3>
-                    <p className="text-sm text-[var(--gray-400)] mb-5">ابدأ بإنشاء صفحتك الأولى</p>
-                    <button onClick={() => setShowNewPage(true)} className="bg-gradient-to-br from-[var(--primary)] to-[var(--primary-dark)] text-white px-6 py-2.5 rounded-2xl text-sm font-semibold hover:shadow-lg hover:shadow-[var(--primary)]/25 transition-all duration-300">+ إنشاء صفحة</button>
+                    <p className="text-[13px] text-[var(--gray-500)] mb-3">لم تنشئ أي صفحة بعد</p>
+                    <button onClick={() => setShowNewPage(true)} className="text-[13px] font-semibold text-[var(--primary)] hover:text-[var(--primary-hover)] transition-colors">
+                      + إنشاء صفحتك الأولى
+                    </button>
                   </div>
                 )}
               </div>
@@ -245,41 +327,70 @@ export default function Dashboard() {
           )}
 
           {section === 'pages' && (
-            <div className="space-y-7 animate-fadeIn">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h2 className="text-2xl font-extrabold text-[var(--gray-900)]">صفحاتي</h2>
-                  <p className="text-sm text-[var(--gray-400)] mt-1">{pages.length} صفحة</p>
-                </div>
-                <button onClick={() => setShowNewPage(true)} className="bg-gradient-to-br from-[var(--primary)] to-[var(--primary-dark)] text-white px-5 py-2.5 rounded-2xl text-sm font-semibold hover:shadow-lg hover:shadow-[var(--primary)]/25 transition-all duration-300">+ صفحة جديدة</button>
-              </div>
+            <div className="space-y-5 animate-fadeIn">
               {pages.length === 0 ? (
-                <div className="bg-white rounded-3xl border border-[var(--gray-100)] py-16 text-center">
-                  <div className="w-16 h-16 rounded-3xl bg-[var(--gray-100)] flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-8 h-8 text-[var(--gray-300)]" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>
+                <div className="bg-white rounded-xl border border-[var(--gray-200)] py-16 text-center">
+                  <div className="w-14 h-14 rounded-xl bg-[var(--gray-100)] flex items-center justify-center mx-auto mb-4">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M19 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2z" stroke="var(--gray-300)" strokeWidth="1.5"/><path d="M9 7h6M9 12h6M9 17h3" stroke="var(--gray-300)" strokeWidth="1.5" strokeLinecap="round"/></svg>
                   </div>
-                  <h3 className="text-lg font-bold text-[var(--gray-900)] mb-2">لا توجد صفحات</h3>
-                  <p className="text-sm text-[var(--gray-400)] mb-5">ابدأ بإنشاء صفحتك الأولى</p>
-                  <button onClick={() => setShowNewPage(true)} className="bg-gradient-to-br from-[var(--primary)] to-[var(--primary-dark)] text-white px-6 py-3 rounded-2xl text-sm font-semibold hover:shadow-lg hover:shadow-[var(--primary)]/25 transition-all duration-300">+ إنشاء صفحة</button>
+                  <h3 className="text-[15px] font-semibold text-[var(--gray-800)] mb-1">لا توجد صفحات</h3>
+                  <p className="text-[13px] text-[var(--gray-400)] mb-4">ابدأ بإنشاء صفحتك الأولى</p>
+                  <button onClick={() => setShowNewPage(true)} className="px-5 py-2.5 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-lg text-[13px] font-semibold transition-colors shadow-sm">
+                    + صفحة جديدة
+                  </button>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                   {pages.map(p => (
-                    <div key={p.id} className="bg-white rounded-3xl border border-[var(--gray-100)] p-6 hover:shadow-lg hover:-translate-y-1 transition-all duration-500 group">
-                      <div className="flex justify-between items-start mb-4">
-                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${p.is_published ? 'bg-[var(--success-bg)] text-[var(--success)]' : 'bg-[var(--warning-bg)] text-[var(--warning)]'}`}>{p.is_published ? 'منشورة' : 'مسودة'}</span>
-                        <button onClick={() => deletePage(p.id)} className="p-1.5 rounded-xl hover:bg-[var(--danger-bg)] text-[var(--gray-300)] hover:text-[var(--danger)] transition-all duration-300 opacity-0 group-hover:opacity-100">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
-                        </button>
+                    <div key={p.id} className="bg-white rounded-xl border border-[var(--gray-200)] overflow-hidden hover:shadow-md transition-all duration-300 group">
+                      {/* Preview Thumbnail */}
+                      <div className={`h-36 bg-gradient-to-br ${getPageColor(p.title)} relative overflow-hidden`}>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <span className="text-white/20 text-6xl font-bold">{p.title[0]}</span>
+                        </div>
+                        <div className="absolute top-3 right-3">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-semibold backdrop-blur-sm ${p.is_published ? 'bg-white/20 text-white' : 'bg-black/20 text-white/80'}`}>
+                            {p.is_published ? 'منشورة' : 'مسودة'}
+                          </span>
+                        </div>
+                        <div className="absolute bottom-3 left-3 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1.5">
+                          <Link href={'/dashboard/' + p.id} className="px-3 py-1.5 bg-white rounded-md text-[11px] font-semibold text-[var(--gray-800)] hover:bg-[var(--gray-50)] transition-colors shadow-sm">
+                            تعديل
+                          </Link>
+                          {p.is_published && (
+                            <a href={`https://${sub}.${BASE}/${p.slug}`} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 bg-white/90 rounded-md text-[11px] font-semibold text-[var(--gray-800)] hover:bg-white transition-colors shadow-sm">
+                              عرض
+                            </a>
+                          )}
+                        </div>
                       </div>
-                      <div className="w-12 h-12 rounded-2xl bg-[var(--primary-bg)] flex items-center justify-center mb-4">
-                        <svg className="w-6 h-6 text-[var(--primary)]" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
-                      </div>
-                      <h3 className="text-sm font-bold text-[var(--gray-900)] mb-1">{p.title}</h3>
-                      <p className="text-xs text-[var(--gray-400)] mb-4">/{p.slug} · {p.views} مشاهدة</p>
-                      <div className="flex gap-2">
-                        <Link href={'/dashboard/' + p.id} className="flex-1 px-3 py-2 bg-gradient-to-br from-[var(--primary)] to-[var(--primary-dark)] text-white rounded-xl text-xs font-semibold text-center hover:shadow-md transition-all duration-300">فتح المحرر</Link>
-                        <button onClick={() => togglePublish(p.id, p.is_published)} className="px-3 py-2 bg-[var(--gray-100)] text-[var(--gray-600)] rounded-xl text-xs font-semibold hover:bg-[var(--gray-200)] transition-all duration-300">{p.is_published ? 'إلغاء' : 'نشر'}</button>
+                      {/* Info */}
+                      <div className="p-4">
+                        <div className="flex items-start justify-between">
+                          <div className="min-w-0 flex-1">
+                            <h3 className="text-[14px] font-semibold text-[var(--gray-800)] truncate">{p.title}</h3>
+                            <p className="text-[11px] text-[var(--gray-400)] mt-0.5">/{p.slug}</p>
+                          </div>
+                          <button onClick={() => deletePage(p.id)} className="p-1.5 rounded-md hover:bg-[var(--danger-bg)] text-[var(--gray-300)] hover:text-[var(--danger)] transition-colors opacity-0 group-hover:opacity-100 flex-shrink-0">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.625 3.5h8.75M5.25 3.5V2.625a.875.875 0 01.875-.875h1.75a.875.875 0 01.875.875V3.5m2.625 0v7.875a1.75 1.75 0 01-1.75 1.75H4.375a1.75 1.75 0 01-1.75-1.75V3.5h9.75z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-3 mt-3">
+                          <span className="text-[11px] text-[var(--gray-400)]">{p.views} مشاهدة</span>
+                          <span className="text-[11px] text-[var(--gray-400)]">·</span>
+                          <span className="text-[11px] text-[var(--gray-400)]">{formatDate(p.updated_at)}</span>
+                          <span className="mr-auto" />
+                          <button
+                            onClick={() => togglePublish(p.id, p.is_published)}
+                            className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
+                              p.is_published
+                                ? 'bg-[var(--gray-100)] text-[var(--gray-600)] hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]'
+                                : 'bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)]'
+                            }`}
+                          >
+                            {p.is_published ? 'إلغاء النشر' : 'نشر'}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -289,30 +400,32 @@ export default function Dashboard() {
           )}
 
           {section === 'templates' && (
-            <div className="space-y-7 animate-fadeIn">
+            <div className="space-y-5 animate-fadeIn">
               <div>
-                <h2 className="text-2xl font-extrabold text-[var(--gray-900)]">القوالب الجاهزة</h2>
-                <p className="text-sm text-[var(--gray-400)] mt-1">اختر قالباً لبدء بناء صفحتك بسرعة</p>
+                <h2 className="text-lg font-bold text-[var(--gray-900)]">اختر قالباً</h2>
+                <p className="text-[13px] text-[var(--gray-500)] mt-1">ابدأ بسرعة مع قوالب احترافية جاهزة</p>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {templates.map(t => (
-                  <div key={t.id} onClick={() => createFromTemplate(t.id)} className="bg-white border border-[var(--gray-100)] rounded-3xl p-6 cursor-pointer hover:border-[var(--primary)] hover:shadow-lg transition-all duration-500 group">
-                    <div className="w-14 h-14 rounded-2xl bg-[var(--primary-bg)] flex items-center justify-center text-3xl mb-4 group-hover:scale-110 transition-transform duration-300">{t.thumbnail}</div>
-                    <h3 className="text-sm font-bold text-[var(--gray-900)] mb-1">{t.name}</h3>
-                    <p className="text-xs text-[var(--gray-400)]">{t.nameEn}</p>
-                  </div>
+                  <button key={t.id} onClick={() => createFromTemplate(t.id)} className="bg-white border border-[var(--gray-200)] rounded-xl p-5 text-right hover:border-[var(--primary)] hover:shadow-md transition-all duration-200 group">
+                    <div className="w-12 h-12 rounded-lg bg-[var(--primary-bg)] flex items-center justify-center text-2xl mb-3 group-hover:scale-110 transition-transform">
+                      {t.thumbnail}
+                    </div>
+                    <h3 className="text-[13px] font-semibold text-[var(--gray-800)]">{t.name}</h3>
+                    <p className="text-[11px] text-[var(--gray-400)] mt-0.5">{t.nameEn}</p>
+                  </button>
                 ))}
               </div>
             </div>
           )}
 
           {section === 'settings' && (
-            <div className="space-y-7 animate-fadeIn">
+            <div className="space-y-5 animate-fadeIn max-w-lg">
               <div>
-                <h2 className="text-2xl font-extrabold text-[var(--gray-900)]">الإعدادات</h2>
-                <p className="text-sm text-[var(--gray-400)] mt-1">تعديل معلومات حسابك</p>
+                <h2 className="text-lg font-bold text-[var(--gray-900)]">الإعدادات</h2>
+                <p className="text-[13px] text-[var(--gray-500)] mt-1">تعديل معلومات حسابك</p>
               </div>
-              <div className="bg-white rounded-3xl border border-[var(--gray-100)] p-7 max-w-lg">
+              <div className="bg-white rounded-xl border border-[var(--gray-200)] p-5">
                 <SettingsForm user={user} showToast={showToast} />
               </div>
             </div>
@@ -322,24 +435,37 @@ export default function Dashboard() {
 
       {/* New Page Modal */}
       {showNewPage && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowNewPage(false)}>
-          <div className="bg-white rounded-3xl w-full max-w-sm p-7 shadow-2xl animate-scaleIn" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-lg font-extrabold text-[var(--gray-900)]">صفحة جديدة</h3>
-              <button onClick={() => setShowNewPage(false)} className="w-8 h-8 rounded-xl hover:bg-[var(--gray-100)] flex items-center justify-center text-[var(--gray-400)] transition-colors">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowNewPage(false)}>
+          <div className="bg-white rounded-xl w-full max-w-sm p-6 shadow-xl animate-scaleIn" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-[15px] font-bold text-[var(--gray-900)]">صفحة جديدة</h3>
+              <button onClick={() => setShowNewPage(false)} className="p-1.5 rounded-lg hover:bg-[var(--gray-100)] text-[var(--gray-400)] transition-colors">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
               </button>
             </div>
-            <label className="block text-xs font-semibold text-[var(--gray-600)] mb-2">عنوان الصفحة</label>
-            <input value={pageTitle} onChange={e => setPageTitle(e.target.value)} placeholder="مثال: صفحتي الشخصية"
-              className="w-full px-5 py-3.5 border-2 border-[var(--gray-200)] rounded-2xl text-sm focus:border-[var(--primary)] focus:ring-4 focus:ring-[var(--primary)]/10 outline-none transition-all duration-300 mb-5" />
-            <button onClick={createPage} className="w-full bg-gradient-to-br from-[var(--primary)] to-[var(--primary-dark)] text-white py-3.5 rounded-2xl font-bold text-sm hover:shadow-lg hover:shadow-[var(--primary)]/25 transition-all duration-300">إنشاء وفتح المحرر</button>
+            <label className="block text-[12px] font-medium text-[var(--gray-600)] mb-1.5">عنوان الصفحة</label>
+            <input
+              value={pageTitle}
+              onChange={e => setPageTitle(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && createPage()}
+              placeholder="مثال: صفحتي الشخصية"
+              className="w-full px-4 py-2.5 border border-[var(--gray-200)] rounded-lg text-[13px] focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary)]/10 outline-none transition-all mb-4"
+              autoFocus
+            />
+            <button onClick={createPage} className="w-full py-2.5 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-lg text-[13px] font-semibold transition-colors shadow-sm">
+              إنشاء وفتح المحرر
+            </button>
           </div>
         </div>
       )}
 
       {/* Toast */}
-      {toast && <div className="fixed bottom-6 right-6 bg-[var(--gray-900)] text-white px-5 py-3.5 rounded-2xl text-sm font-medium z-50 shadow-2xl flex items-center gap-2.5 animate-slideUp"><svg className="w-4 h-4 text-[var(--success)]" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>{toast}</div>}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-[var(--gray-900)] text-white px-4 py-2.5 rounded-lg text-[13px] font-medium z-50 shadow-xl flex items-center gap-2 animate-slideUp">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="var(--success)" strokeWidth="1.5"/><path d="M5.5 8l2 2 3-3" stroke="var(--success)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
@@ -351,28 +477,32 @@ function SettingsForm({ user, showToast }: { user: User; showToast: (m: string) 
   const [saving, setSaving] = useState(false);
 
   async function save(e: React.FormEvent) {
-    e.preventDefault(); setSaving(true);
+    e.preventDefault();
+    setSaving(true);
     const r = await fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, username, bio }) });
-    const d = await r.json(); setSaving(false);
+    const d = await r.json();
+    setSaving(false);
     if (d.user) showToast('تم الحفظ'); else showToast(d.error || 'خطأ');
   }
 
   return (
-    <form onSubmit={save} className="space-y-5">
+    <form onSubmit={save} className="space-y-4">
       <div>
-        <label className="block text-xs font-semibold text-[var(--gray-600)] mb-2">الاسم</label>
-        <input value={name} onChange={e => setName(e.target.value)} className="w-full px-5 py-3.5 border-2 border-[var(--gray-200)] rounded-2xl text-sm focus:border-[var(--primary)] focus:ring-4 focus:ring-[var(--primary)]/10 outline-none transition-all duration-300" />
+        <label className="block text-[12px] font-medium text-[var(--gray-600)] mb-1.5">الاسم</label>
+        <input value={name} onChange={e => setName(e.target.value)} className="w-full px-4 py-2.5 border border-[var(--gray-200)] rounded-lg text-[13px] focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary)]/10 outline-none transition-all" />
       </div>
       <div>
-        <label className="block text-xs font-semibold text-[var(--gray-600)] mb-2">اسم المستخدم</label>
-        <input value={username} onChange={e => setUsername(e.target.value)} className="w-full px-5 py-3.5 border-2 border-[var(--gray-200)] rounded-2xl text-sm focus:border-[var(--primary)] focus:ring-4 focus:ring-[var(--primary)]/10 outline-none transition-all duration-300" />
-        <p className="text-xs text-[var(--gray-400)] mt-1.5">صفحتك: <span className="text-[var(--primary)] font-semibold">{username}.buildora.vexonet.online</span></p>
+        <label className="block text-[12px] font-medium text-[var(--gray-600)] mb-1.5">اسم المستخدم</label>
+        <input value={username} onChange={e => setUsername(e.target.value)} className="w-full px-4 py-2.5 border border-[var(--gray-200)] rounded-lg text-[13px] focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary)]/10 outline-none transition-all" />
+        <p className="text-[11px] text-[var(--gray-400)] mt-1">صفحتك: <span className="text-[var(--primary)] font-medium">{username}.buildora.vexonet.online</span></p>
       </div>
       <div>
-        <label className="block text-xs font-semibold text-[var(--gray-600)] mb-2">نبذة عنك</label>
-        <textarea value={bio} onChange={e => setBio(e.target.value)} className="w-full px-5 py-3.5 border-2 border-[var(--gray-200)] rounded-2xl text-sm focus:border-[var(--primary)] focus:ring-4 focus:ring-[var(--primary)]/10 outline-none transition-all duration-300 min-h-[90px] resize-none" placeholder="اكتب شيئاً عنك..." />
+        <label className="block text-[12px] font-medium text-[var(--gray-600)] mb-1.5">نبذة عنك</label>
+        <textarea value={bio} onChange={e => setBio(e.target.value)} className="w-full px-4 py-2.5 border border-[var(--gray-200)] rounded-lg text-[13px] focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary)]/10 outline-none transition-all min-h-[80px] resize-none" placeholder="اكتب شيئاً عنك..." />
       </div>
-      <button type="submit" disabled={saving} className="w-full bg-gradient-to-br from-[var(--primary)] to-[var(--primary-dark)] text-white py-3.5 rounded-2xl font-bold text-sm transition-all duration-300 shadow-lg shadow-[var(--primary)]/25 hover:shadow-xl hover:shadow-[var(--primary)]/35 disabled:opacity-50">{saving ? 'جاري الحفظ...' : 'حفظ التغييرات'}</button>
+      <button type="submit" disabled={saving} className="w-full py-2.5 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-lg text-[13px] font-semibold transition-colors shadow-sm disabled:opacity-50">
+        {saving ? 'جاري الحفظ...' : 'حفظ التغييرات'}
+      </button>
     </form>
   );
 }
